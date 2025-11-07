@@ -27,6 +27,10 @@ room-env-data-pipeline/
 │       ├── outputs.tf
 │       ├── terraform.tfvars       # 設定済み（room-env-data-pipeline）
 │       └── terraform.tfvars.example
+├── scripts/
+│   └── setup_switchbot_webhook.sh # SwitchBot Webhook設定スクリプト
+├── .env                           # SwitchBot認証情報（gitignoreされています）
+├── .env.example                   # 認証情報のテンプレート
 ├── .terraform-version             # tfenv用のTerraformバージョン指定
 ├── .gitignore
 └── README.md
@@ -40,6 +44,13 @@ room-env-data-pipeline/
   - ヘッダー情報
   - クエリパラメータ
   - リクエストボディ（JSON/Form/Raw）
+- **SwitchBot対応**: SwitchBot Webhookに対応
+  - Lock/Lock Pro/Lock Ultra（施錠状態、バッテリー残量）
+  - Meter/Meter Plus（温度、湿度、バッテリー残量）
+  - Motion Sensor（検知状態、明るさ）
+  - Contact Sensor（開閉状態、明るさ）
+  - Bot（電源状態、バッテリー残量）
+  - その他SwitchBotデバイスにも対応
 - **環境分離**: dev/prd環境で独立したリソース管理
 
 ## 前提条件
@@ -245,6 +256,102 @@ gcloud functions logs read prd-webhook-function \
 - クエリパラメータ
 - リクエストボディ
 - レスポンス内容
+- SwitchBotデバイスの詳細情報（デバイスタイプ、状態、バッテリー等）
+
+## SwitchBot Webhookの設定
+
+このシステムはSwitchBot Webhookに対応しています。
+
+### SwitchBot APIの設定
+
+1. **SwitchBotアプリでOpen Tokenを取得**
+   - SwitchBotアプリ → プロフィール → 設定 → アプリバージョン（10回タップして開発者オプションを有効化）
+   - 「トークン」をタップしてOpen TokenとSecret Keyを取得
+
+2. **Webhook URLを設定**
+
+開発環境のWebhook URL:
+```
+https://asia-northeast1-room-env-data-pipeline-dev.cloudfunctions.net/dev-webhook-function
+```
+
+本番環境のWebhook URL:
+```
+https://asia-northeast1-room-env-data-pipeline.cloudfunctions.net/prd-webhook-function
+```
+
+3. **SwitchBot APIでWebhook URLを登録**
+
+`.env`ファイルに認証情報を設定してスクリプトを実行するだけで簡単に設定できます：
+
+```bash
+# プロジェクトルートで実行
+bash scripts/setup_switchbot_webhook.sh
+```
+
+または、手動で設定する場合：
+
+```bash
+# 認証情報の設定（.envファイルから読み込み）
+source .env
+NONCE=$(uuidgen)
+T=$(date +%s)000
+SIGN=$(echo -n "${SWITCHBOT_TOKEN}${T}${NONCE}" | openssl dgst -sha256 -hmac "${SWITCHBOT_SECRET}" -binary | base64)
+
+# Webhook URLの設定
+curl -X POST "https://api.switch-bot.com/v1.1/webhook/setupWebhook" \
+  -H "Authorization: ${SWITCHBOT_TOKEN}" \
+  -H "sign: ${SIGN}" \
+  -H "t: ${T}" \
+  -H "nonce: ${NONCE}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "setupWebhook",
+    "url": "https://asia-northeast1-room-env-data-pipeline-dev.cloudfunctions.net/dev-webhook-function",
+    "deviceList": "ALL"
+  }'
+
+# 設定確認
+curl -X POST "https://api.switch-bot.com/v1.1/webhook/queryWebhook" \
+  -H "Authorization: ${SWITCHBOT_TOKEN}" \
+  -H "sign: ${SIGN}" \
+  -H "t: ${T}" \
+  -H "nonce: ${NONCE}" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"queryUrl"}' | jq '.'
+```
+
+参考: [SwitchBot API Documentation](https://github.com/OpenWonderLabs/SwitchBotAPI?tab=readme-ov-file#get-webhook-configuration)
+
+### 対応デバイス
+
+現在対応しているSwitchBotデバイス：
+
+| デバイス | 取得データ |
+|---------|-----------|
+| **Lock/Lock Pro/Lock Ultra** | 施錠状態（LOCKED/UNLOCKED/JAMMED）、バッテリー残量 |
+| **Meter/Meter Plus** | 温度、湿度、バッテリー残量 |
+| **Motion Sensor** | 検知状態（DETECTED/NOT_DETECTED）、明るさ |
+| **Contact Sensor** | 開閉状態（open/close/timeOutNotClose）、明るさ |
+| **Bot** | 電源状態（ON/OFF）、バッテリー残量 |
+
+その他のSwitchBotデバイスも基本的な情報を受信・ログ出力できます。
+
+### ログの確認例
+
+SwitchBotデバイスのイベントは、以下のようにログに記録されます：
+
+```
+[SwitchBot] Event Type: changeReport, Version: 1
+[SwitchBot] Device: WoSensorTH (MAC: AA:BB:CC:DD:EE:FF)
+[SwitchBot Meter] Temp: 25.3°C, Humidity: 65%, Battery: 85%
+```
+
+```
+[SwitchBot] Event Type: changeReport, Version: 1
+[SwitchBot] Device: Smart Lock Pro (MAC: 11:22:33:44:55:66)
+[SwitchBot Lock] State: LOCKED, Battery: 90%
+```
 
 ## 設定のカスタマイズ
 
