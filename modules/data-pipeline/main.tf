@@ -298,6 +298,189 @@ resource "google_bigquery_table" "sensor_hourly_stats" {
   ])
 }
 
+# 日別統計テーブル
+resource "google_bigquery_table" "sensor_daily_stats" {
+  dataset_id = google_bigquery_dataset.sensor_data.dataset_id
+  table_id   = "sensor_daily_stats"
+  project    = var.project_id
+
+  labels = {
+    environment = var.environment
+    type        = "aggregated"
+  }
+
+  time_partitioning {
+    type  = "DAY"
+    field = "date"
+  }
+
+  clustering = ["device_mac", "device_type"]
+
+  schema = jsonencode([
+    {
+      name        = "date"
+      type        = "DATE"
+      mode        = "REQUIRED"
+      description = "Date"
+    },
+    {
+      name        = "device_mac"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Device MAC address"
+    },
+    {
+      name        = "device_type"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Device type"
+    },
+    {
+      name        = "avg_temperature"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Average temperature"
+    },
+    {
+      name        = "min_temperature"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Minimum temperature"
+    },
+    {
+      name        = "max_temperature"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Maximum temperature"
+    },
+    {
+      name        = "avg_humidity"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Average humidity"
+    },
+    {
+      name        = "min_humidity"
+      type        = "INTEGER"
+      mode        = "NULLABLE"
+      description = "Minimum humidity"
+    },
+    {
+      name        = "max_humidity"
+      type        = "INTEGER"
+      mode        = "NULLABLE"
+      description = "Maximum humidity"
+    },
+    {
+      name        = "avg_battery"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Average battery level"
+    },
+    {
+      name        = "total_events"
+      type        = "INTEGER"
+      mode        = "REQUIRED"
+      description = "Total number of events in this day"
+    },
+    {
+      name        = "last_updated"
+      type        = "TIMESTAMP"
+      mode        = "REQUIRED"
+      description = "When this record was last updated"
+    }
+  ])
+}
+
+# 最新状態テーブル（Looker用）
+resource "google_bigquery_table" "sensor_latest" {
+  dataset_id = google_bigquery_dataset.sensor_data.dataset_id
+  table_id   = "sensor_latest"
+  project    = var.project_id
+
+  labels = {
+    environment = var.environment
+    type        = "aggregated"
+  }
+
+  clustering = ["device_mac", "device_type"]
+
+  schema = jsonencode([
+    {
+      name        = "device_mac"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Device MAC address"
+    },
+    {
+      name        = "device_type"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Device type"
+    },
+    {
+      name        = "last_updated"
+      type        = "TIMESTAMP"
+      mode        = "REQUIRED"
+      description = "Last update timestamp"
+    },
+    {
+      name        = "current_temperature"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Current temperature"
+    },
+    {
+      name        = "current_humidity"
+      type        = "INTEGER"
+      mode        = "NULLABLE"
+      description = "Current humidity"
+    },
+    {
+      name        = "current_battery"
+      type        = "INTEGER"
+      mode        = "NULLABLE"
+      description = "Current battery level"
+    },
+    {
+      name        = "lock_state"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Lock state"
+    },
+    {
+      name        = "detection_state"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Motion detection state"
+    },
+    {
+      name        = "open_state"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Contact sensor open state"
+    },
+    {
+      name        = "power_state"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Power state"
+    },
+    {
+      name        = "brightness"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Brightness level"
+    },
+    {
+      name        = "minutes_since_update"
+      type        = "INTEGER"
+      mode        = "NULLABLE"
+      description = "Minutes since last update"
+    }
+  ])
+}
+
 # Pub/Sub Publisher権限をCloud Functionsのサービスアカウントに付与
 resource "google_pubsub_topic_iam_member" "publisher" {
   project = var.project_id
@@ -340,5 +523,73 @@ resource "google_project_iam_member" "pubsub_bigquery_user" {
   project = var.project_id
   role    = "roles/bigquery.user"
   member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
+# ============================================================================
+# Dataform
+# ============================================================================
+
+# Dataform API有効化
+resource "google_project_service" "dataform" {
+  project = var.project_id
+  service = "dataform.googleapis.com"
+
+  disable_on_destroy = false
+}
+
+# Dataformリポジトリ
+resource "google_dataform_repository" "sensor_data_transformation" {
+  provider = google-beta
+  
+  name    = "${var.environment}-sensor-data-transformation"
+  region  = var.region
+  project = var.project_id
+
+  labels = {
+    environment = var.environment
+    purpose     = "data-transformation"
+  }
+
+  depends_on = [google_project_service.dataform]
+}
+
+# Dataformリリース設定（スケジュール実行）
+resource "google_dataform_repository_release_config" "hourly_aggregation" {
+  provider = google-beta
+  
+  project    = var.project_id
+  region     = var.region
+  repository = google_dataform_repository.sensor_data_transformation.name
+  name       = "hourly-aggregation"
+
+  git_commitish = "main"
+  cron_schedule = "0 * * * *"  # 毎時0分に実行
+  time_zone     = "Asia/Tokyo"
+
+  code_compilation_config {
+    default_database = var.project_id
+    default_schema   = google_bigquery_dataset.sensor_data.dataset_id
+    default_location = var.region
+  }
+}
+
+# Dataformサービスアカウントの権限設定
+# BigQuery Job User (クエリ実行権限)
+resource "google_project_iam_member" "dataform_bigquery_job_user" {
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dataform.iam.gserviceaccount.com"
+
+  depends_on = [google_project_service.dataform]
+}
+
+# BigQuery Data Editor (データ編集権限)
+resource "google_bigquery_dataset_iam_member" "dataform_data_editor" {
+  project    = var.project_id
+  dataset_id = google_bigquery_dataset.sensor_data.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dataform.iam.gserviceaccount.com"
+
+  depends_on = [google_project_service.dataform]
 }
 

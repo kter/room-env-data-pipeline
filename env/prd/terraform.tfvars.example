@@ -1,0 +1,21 @@
+# GCPプロジェクトID（必須：実際の値に置き換えてください）
+project_id = "your-gcp-project-id"
+
+# リージョン
+region = "asia-northeast1"
+
+# 環境名
+environment = "prd"
+
+# Cloud Functionsの設定（本番環境用に増強）
+max_instance_count = 20
+min_instance_count = 1
+memory             = "512Mi"
+timeout_seconds    = 60
+
+# 環境変数
+environment_variables = {
+  ENVIRONMENT = "production"
+  LOG_LEVEL   = "WARNING"
+}
+

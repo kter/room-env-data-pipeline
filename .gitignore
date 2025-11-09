@@ -37,8 +37,12 @@ wheels/
 .installed.cfg
 *.egg
 venv/
-env/
 ENV/
+# Python仮想環境 (Terraformのenv/dev, env/prdは除外)
+!env/
+env/*
+!env/dev/
+!env/prd/
 
 # Cloud Functions
 function-source.zip
