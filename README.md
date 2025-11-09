@@ -165,6 +165,58 @@ gcloud services enable cloudfunctions.googleapis.com \
   - `roles/bigquery.admin`
   - `roles/dataform.admin`
 
+## Gitフロー
+
+このプロジェクトは、環境ごとに異なるGitブランチを使用する戦略を採用しています。
+
+### ブランチ戦略
+
+```
+feature/* (機能開発)
+    ↓ Pull Request & Merge
+develop (開発環境用)
+    ↓ Pull Request & Merge
+main (本番環境用)
+```
+
+### 環境とブランチの対応
+
+| 環境 | ブランチ | Dataform同期ブランチ | プロジェクトID |
+|------|---------|---------------------|---------------|
+| **開発環境** | `develop` | `develop` | `room-env-data-pipeline-dev` |
+| **本番環境** | `main` | `main` | `room-env-data-pipeline` |
+
+### ワークフロー
+
+1. **機能開発**: `feature/*` ブランチで開発
+   ```bash
+   git checkout -b feature/new-feature
+   # コード変更
+   git commit -m "feat: 新機能を追加"
+   git push origin feature/new-feature
+   ```
+
+2. **開発環境へのデプロイ**: `develop` ブランチにマージ
+   ```bash
+   # GitHubでPull Requestを作成
+   # レビュー後、developにマージ
+   # → Dataformが自動的にdevelopブランチと同期
+   ```
+
+3. **本番環境へのデプロイ**: `main` ブランチにマージ
+   ```bash
+   # GitHubでdevelop → mainのPull Requestを作成
+   # 本番リリース準備完了後、mainにマージ
+   # → Dataformが自動的にmainブランチと同期
+   ```
+
+### Dataform同期の仕組み
+
+- **dev環境**: Dataformは `develop` ブランチの `dataform/` ディレクトリを自動同期
+- **prd環境**: Dataformは `main` ブランチの `dataform/` ディレクトリを自動同期
+
+これにより、Dataformの定義ファイル（`.sqlx`）をGitで管理し、環境ごとに適切なバージョンを自動デプロイできます。
+
 ## セットアップ
 
 ### 1. tfenvのインストールとTerraformセットアップ
