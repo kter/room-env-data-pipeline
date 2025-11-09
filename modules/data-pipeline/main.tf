@@ -579,6 +579,21 @@ resource "google_secret_manager_secret_version" "dataform_github_token_version" 
   }
 }
 
+# DataformサービスアカウントにSecret Managerへのアクセス権を付与
+resource "google_secret_manager_secret_iam_member" "dataform_secret_accessor" {
+  count = var.dataform_git_repository_url != "" ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.dataform_github_token[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dataform.iam.gserviceaccount.com"
+
+  depends_on = [
+    google_secret_manager_secret.dataform_github_token,
+    google_project_service.dataform
+  ]
+}
+
 # Dataformリポジトリ（GitHub連携オプション）
 resource "google_dataform_repository" "sensor_data_transformation" {
   provider = google-beta
