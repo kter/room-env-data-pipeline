@@ -77,3 +77,9 @@ variable "github_token" {
   sensitive   = true
 }
 
+variable "dataform_git_branch" {
+  description = "Dataformと同期するGitブランチ（dev環境: develop推奨）"
+  type        = string
+  default     = "develop"  # dev環境ではdevelopブランチを使用
+}
+

@@ -41,6 +41,7 @@ module "data_pipeline" {
   table_expiration_days             = var.table_expiration_days
   dataform_git_repository_url       = var.dataform_git_repository_url
   dataform_git_token_secret_version = var.dataform_git_token_secret_version
+  dataform_git_branch               = var.dataform_git_branch
   github_token                      = var.github_token
 }
 

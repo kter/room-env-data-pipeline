@@ -25,6 +25,7 @@ table_expiration_days = 0 # 無期限（履歴データとして保持）
 
 # Dataform GitHub連携設定（オプション）
 dataform_git_repository_url = "https://github.com/your-org/your-repo.git"
+dataform_git_branch         = "develop"  # dev環境ではdevelopブランチと同期
 # github_token は環境変数 TF_VAR_github_token で設定
 # export TF_VAR_github_token="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
