@@ -614,6 +614,9 @@ resource "google_dataform_repository" "sensor_data_transformation" {
       url            = var.dataform_git_repository_url
       default_branch = var.dataform_git_branch  # 環境ごとに異なるブランチを設定
       
+      # Dataform定義ファイルが格納されているサブディレクトリ
+      directory_path = "dataform"
+      
       # Secret ManagerからトークンのバージョンIDを取得
       # 外部で管理されている場合はdataform_git_token_secret_versionを使用
       # そうでない場合は自動作成したシークレットを使用
