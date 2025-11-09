@@ -1,0 +1,46 @@
+config {
+  type: "table",
+  schema: "dev_sensor_data",
+  description: "各デバイスの最新状態（Lookerダッシュボード用）",
+  bigquery: {
+    clusterBy: ["device_mac", "device_type"]
+  },
+  tags: ["latest", "dashboard", "looker"]
+}
+
+-- 各デバイスの最新データを取得
+WITH latest_records AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY device_mac, device_type
+      ORDER BY timestamp DESC
+    ) AS rn
+  FROM
+    ${ref("sensor_raw_data")}
+)
+
+SELECT
+  device_mac,
+  device_type,
+  timestamp AS last_updated,
+  temperature AS current_temperature,
+  humidity AS current_humidity,
+  battery AS current_battery,
+  lock_state,
+  detection_state,
+  open_state,
+  power_state,
+  brightness,
+  -- 温度の変化トレンド（過去1時間との比較）
+  temperature - LAG(temperature) OVER (
+    PARTITION BY device_mac
+    ORDER BY timestamp
+  ) AS temperature_change,
+  -- データ鮮度（最終更新からの経過時間）
+  TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), timestamp, MINUTE) AS minutes_since_update
+FROM
+  latest_records
+WHERE
+  rn = 1
+

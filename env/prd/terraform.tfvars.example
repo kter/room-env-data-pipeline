@@ -1,0 +1,31 @@
+# GCPプロジェクトID（必須：実際の値に置き換えてください）
+project_id = "your-gcp-project-id"
+
+# リージョン
+region = "asia-northeast1"
+
+# 環境名
+environment = "prd"
+
+# Cloud Functionsの設定（本番環境用に増強）
+max_instance_count = 20
+min_instance_count = 1
+memory             = "512Mi"
+timeout_seconds    = 60
+
+# 環境変数
+environment_variables = {
+  ENVIRONMENT = "production"
+  LOG_LEVEL   = "WARNING"
+}
+
+# BigQuery設定
+bigquery_owner_email  = "your-email@example.com"
+table_expiration_days = 0 # 無期限（履歴データとして保持）
+
+# Dataform GitHub連携設定（オプション）
+dataform_git_repository_url = "https://github.com/your-org/your-repo.git"
+dataform_git_branch         = "main"  # prd環境ではmainブランチと同期
+# github_token は環境変数 TF_VAR_github_token で設定
+# export TF_VAR_github_token="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
