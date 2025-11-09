@@ -647,7 +647,7 @@ resource "google_dataform_repository_release_config" "hourly_aggregation" {
   repository = google_dataform_repository.sensor_data_transformation.name
   name       = "hourly-aggregation"
 
-  git_commitish = "main"
+  git_commitish = var.dataform_git_branch  # 環境ごとに異なるブランチを参照
   cron_schedule = "0 * * * *"  # 毎時0分に実行
   time_zone     = "Asia/Tokyo"
 
