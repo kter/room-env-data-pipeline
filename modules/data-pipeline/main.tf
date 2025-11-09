@@ -539,7 +539,7 @@ resource "google_project_service" "dataform" {
 
 # Secret Manager API有効化（GitHub連携用）
 resource "google_project_service" "secretmanager" {
-  count   = var.dataform_git_repository_url != "" ? 1 : 0
+  count   = var.dataform_git_repository_url != "" && var.dataform_git_token_secret_version != "" ? 1 : 0
   project = var.project_id
   service = "secretmanager.googleapis.com"
 
@@ -560,8 +560,9 @@ resource "google_dataform_repository" "sensor_data_transformation" {
   }
 
   # GitHub連携設定（オプション）
+  # URLとトークンの両方が設定されている場合のみ有効
   dynamic "git_remote_settings" {
-    for_each = var.dataform_git_repository_url != "" ? [1] : []
+    for_each = var.dataform_git_repository_url != "" && var.dataform_git_token_secret_version != "" ? [1] : []
     content {
       url                                 = var.dataform_git_repository_url
       default_branch                      = "main"

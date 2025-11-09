@@ -61,12 +61,12 @@ variable "table_expiration_days" {
 variable "dataform_git_repository_url" {
   description = "DataformのGitリポジトリURL（例: https://github.com/kter/room-env-data-pipeline.git）"
   type        = string
-  default     = "https://github.com/kter/room-env-data-pipeline.git"
+  default     = ""  # GitHub連携を有効にする場合は設定
 }
 
 variable "dataform_git_token_secret_version" {
   description = "GitHub Personal Access TokenのSecret ManagerバージョンID"
   type        = string
-  default     = ""  # 設定する場合: projects/room-env-data-pipeline-dev/secrets/dataform-github-token/versions/latest
+  default     = ""  # GitHub連携を有効にする場合は設定: projects/room-env-data-pipeline-dev/secrets/dataform-github-token/versions/latest
 }
 
