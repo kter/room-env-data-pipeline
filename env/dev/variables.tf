@@ -70,3 +70,10 @@ variable "dataform_git_token_secret_version" {
   default     = ""  # GitHub連携を有効にする場合は設定: projects/room-env-data-pipeline-dev/secrets/dataform-github-token/versions/latest
 }
 
+variable "github_token" {
+  description = "GitHub Personal Access Token（TF_VAR_github_tokenで設定）"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+

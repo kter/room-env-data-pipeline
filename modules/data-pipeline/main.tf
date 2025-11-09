@@ -539,11 +539,44 @@ resource "google_project_service" "dataform" {
 
 # Secret Manager API有効化（GitHub連携用）
 resource "google_project_service" "secretmanager" {
-  count   = var.dataform_git_repository_url != "" && var.dataform_git_token_secret_version != "" ? 1 : 0
+  count   = var.dataform_git_repository_url != "" ? 1 : 0
   project = var.project_id
   service = "secretmanager.googleapis.com"
 
   disable_on_destroy = false
+}
+
+# GitHub Personal Access TokenをSecret Managerに保存
+resource "google_secret_manager_secret" "dataform_github_token" {
+  count = var.dataform_git_repository_url != "" ? 1 : 0
+
+  project   = var.project_id
+  secret_id = "${var.environment}-dataform-github-token"
+
+  labels = {
+    environment = var.environment
+    purpose     = "dataform-git-auth"
+  }
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+# GitHub PATのバージョン（terraform apply時に環境変数から設定）
+resource "google_secret_manager_secret_version" "dataform_github_token_version" {
+  count = var.dataform_git_repository_url != "" && var.github_token != "" ? 1 : 0
+
+  secret = google_secret_manager_secret.dataform_github_token[0].id
+
+  # 環境変数から取得
+  secret_data = var.github_token
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
 }
 
 # Dataformリポジトリ（GitHub連携オプション）
@@ -560,13 +593,20 @@ resource "google_dataform_repository" "sensor_data_transformation" {
   }
 
   # GitHub連携設定（オプション）
-  # URLとトークンの両方が設定されている場合のみ有効
   dynamic "git_remote_settings" {
-    for_each = var.dataform_git_repository_url != "" && var.dataform_git_token_secret_version != "" ? [1] : []
+    for_each = var.dataform_git_repository_url != "" ? [1] : []
     content {
-      url                                 = var.dataform_git_repository_url
-      default_branch                      = "main"
-      authentication_token_secret_version = var.dataform_git_token_secret_version
+      url            = var.dataform_git_repository_url
+      default_branch = "main"
+      
+      # Secret ManagerからトークンのバージョンIDを取得
+      # 外部で管理されている場合はdataform_git_token_secret_versionを使用
+      # そうでない場合は自動作成したシークレットを使用
+      authentication_token_secret_version = (
+        var.dataform_git_token_secret_version != "" 
+        ? var.dataform_git_token_secret_version 
+        : google_secret_manager_secret_version.dataform_github_token_version[0].id
+      )
     }
   }
 
@@ -576,7 +616,11 @@ resource "google_dataform_repository" "sensor_data_transformation" {
     schema_suffix    = "_${var.environment}"
   }
 
-  depends_on = [google_project_service.dataform]
+  depends_on = [
+    google_project_service.dataform,
+    google_secret_manager_secret.dataform_github_token,
+    google_secret_manager_secret_version.dataform_github_token_version
+  ]
 }
 
 # Dataformリリース設定（スケジュール実行）

@@ -41,6 +41,7 @@ module "data_pipeline" {
   table_expiration_days             = var.table_expiration_days
   dataform_git_repository_url       = var.dataform_git_repository_url
   dataform_git_token_secret_version = var.dataform_git_token_secret_version
+  github_token                      = var.github_token
 }
 
 # Webhook Function モジュール

@@ -47,3 +47,10 @@ variable "dataform_git_token_secret_version" {
   default     = ""
 }
 
+variable "github_token" {
+  description = "GitHub Personal Access Token（terraform apply時に環境変数から設定）"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
