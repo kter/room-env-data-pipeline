@@ -29,16 +29,18 @@ provider "google-beta" {
   region  = var.region
 }
 
-# Data Pipeline モジュール（Pub/Sub, BigQuery）
+# Data Pipeline モジュール（Pub/Sub, BigQuery, Dataform）
 module "data_pipeline" {
   source = "../../modules/data-pipeline"
 
-  project_id                    = var.project_id
-  region                        = var.region
-  environment                   = var.environment
-  function_service_account_email = module.webhook_function.service_account_email
-  bigquery_owner_email          = var.bigquery_owner_email
-  table_expiration_days         = var.table_expiration_days
+  project_id                        = var.project_id
+  region                            = var.region
+  environment                       = var.environment
+  function_service_account_email    = module.webhook_function.service_account_email
+  bigquery_owner_email              = var.bigquery_owner_email
+  table_expiration_days             = var.table_expiration_days
+  dataform_git_repository_url       = var.dataform_git_repository_url
+  dataform_git_token_secret_version = var.dataform_git_token_secret_version
 }
 
 # Webhook Function モジュール

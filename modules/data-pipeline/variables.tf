@@ -35,3 +35,15 @@ variable "table_expiration_days" {
   default     = 0 # 無期限（履歴データとして保持）
 }
 
+variable "dataform_git_repository_url" {
+  description = "DataformのGitリポジトリURL（例: https://github.com/your-org/your-repo.git）"
+  type        = string
+  default     = ""
+}
+
+variable "dataform_git_token_secret_version" {
+  description = "GitHub Personal Access TokenのSecret ManagerバージョンID（例: projects/PROJECT_ID/secrets/dataform-github-token/versions/latest）"
+  type        = string
+  default     = ""
+}
+
