@@ -1,0 +1,32 @@
+config {
+  type: "table",
+  schema: "dev_sensor_data",
+  description: "日別のセンサーデータ集計テーブル（Looker用）",
+  bigquery: {
+    partitionBy: "date",
+    clusterBy: ["device_mac", "device_type"]
+  },
+  tags: ["daily", "aggregation", "looker"]
+}
+
+-- 時間別統計から日別統計を計算
+SELECT
+  DATE(hour_timestamp) AS date,
+  device_mac,
+  device_type,
+  AVG(avg_temperature) AS avg_temperature,
+  MIN(min_temperature) AS min_temperature,
+  MAX(max_temperature) AS max_temperature,
+  AVG(avg_humidity) AS avg_humidity,
+  MIN(min_humidity) AS min_humidity,
+  MAX(max_humidity) AS max_humidity,
+  AVG(avg_battery) AS avg_battery,
+  SUM(event_count) AS total_events,
+  CURRENT_TIMESTAMP() AS last_updated
+FROM
+  ${ref("sensor_hourly_stats")}
+GROUP BY
+  date,
+  device_mac,
+  device_type
+

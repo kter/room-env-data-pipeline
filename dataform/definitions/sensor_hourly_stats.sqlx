@@ -1,0 +1,38 @@
+config {
+  type: "incremental",
+  schema: "dev_sensor_data",
+  description: "時間別のセンサーデータ集計テーブル",
+  bigquery: {
+    partitionBy: "TIMESTAMP_TRUNC(hour_timestamp, DAY)",
+    clusterBy: ["device_mac", "device_type"]
+  },
+  tags: ["hourly", "aggregation"]
+}
+
+-- 生データから1時間ごとの統計を計算
+SELECT
+  TIMESTAMP_TRUNC(timestamp, HOUR) AS hour_timestamp,
+  device_mac,
+  device_type,
+  AVG(temperature) AS avg_temperature,
+  MIN(temperature) AS min_temperature,
+  MAX(temperature) AS max_temperature,
+  AVG(humidity) AS avg_humidity,
+  MIN(humidity) AS min_humidity,
+  MAX(humidity) AS max_humidity,
+  AVG(battery) AS avg_battery,
+  COUNT(*) AS event_count,
+  CURRENT_TIMESTAMP() AS last_updated
+FROM
+  ${ref("sensor_raw_data")}
+WHERE
+  temperature IS NOT NULL
+  OR humidity IS NOT NULL
+
+${ when(incremental(), `AND timestamp > (SELECT MAX(hour_timestamp) FROM ${self()})`) }
+
+GROUP BY
+  hour_timestamp,
+  device_mac,
+  device_type
+

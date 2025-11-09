@@ -1,0 +1,7 @@
+{
+  "defaultSchema": "sensor_data",
+  "assertionSchema": "dataform_assertions",
+  "defaultDatabase": "room-env-data-pipeline-dev",
+  "defaultLocation": "asia-northeast1"
+}
+

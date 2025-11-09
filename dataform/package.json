@@ -1,0 +1,9 @@
+{
+  "name": "room-env-data-pipeline-dataform",
+  "version": "1.0.0",
+  "description": "Dataform transformations for SwitchBot sensor data",
+  "dependencies": {
+    "@dataform/core": "2.9.0"
+  }
+}
+

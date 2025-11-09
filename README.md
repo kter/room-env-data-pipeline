@@ -1,19 +1,58 @@
 # Room Environment Data Pipeline
 
-GCP Cloud FunctionsベースのWebhook受信システムです。Terraformでインフラを管理し、dev/prdの2環境に対応しています。
+GCP Cloud Functionsベースのデータパイプラインシステムです。SwitchBot WebhookからセンサーデータをリアルタイムWEB取得し、BigQueryに保存、Dataformで集計、Lookerで可視化する構成です。Terraformでインフラを管理し、dev/prdの2環境に対応しています。
+
+## アーキテクチャ
+
+```
+SwitchBot Webhook
+    ↓
+Cloud Functions (Webhook受信・データ変換)
+    ↓
+Pub/Sub (非同期メッセージング)
+    ↓
+BigQuery Subscription (自動書き込み)
+    ↓
+BigQuery (生データ保存)
+    ↓
+Dataform (スケジュール実行で集計)
+    ↓
+BigQuery (集計テーブル)
+    ↓
+Looker (ダッシュボード可視化)
+```
+
+### アーキテクチャの特徴
+
+- **Cloud Functions**: Webhookエンドポイント。データ受信、パース、Pub/Subへの送信
+- **Pub/Sub**: 非同期メッセージキュー。リトライポリシーとDead Letter Queue対応
+- **BigQuery Subscription**: Pub/SubからBigQueryへの自動書き込み（サーバーレス）
+- **BigQuery**: データウェアハウス。パーティショニングとクラスタリングで高速クエリ
+- **Dataform**: SQLベースのデータ変換パイプライン。スケジュール実行で定期集計
+- **Looker**: BIツール。リアルタイムダッシュボードとレポート
+
+**メリット**:
+- ✅ サーバーレスで運用コストが低い（常時稼働するサーバー不要）
+- ✅ オートスケーリングで大量データにも対応
+- ✅ Pub/SubとBigQuery Subscriptionでコード不要のETL
+- ✅ Dataflowを使わないため、ストリーミングジョブの管理不要
 
 ## システム構成
 
 ```
 room-env-data-pipeline/
 ├── modules/
-│   └── webhook-function/          # Cloud Functionsモジュール
-│       ├── main.tf                # Cloud Functionsのリソース定義
-│       ├── variables.tf           # モジュールの変数定義
-│       ├── outputs.tf             # モジュールの出力
-│       └── function-source/       # Cloud Functionのソースコード
-│           ├── main.py            # Webhookハンドラー（Python）
-│           └── requirements.txt   # Python依存パッケージ
+│   ├── webhook-function/          # Cloud Functionsモジュール
+│   │   ├── main.tf                # Cloud Functionsのリソース定義
+│   │   ├── variables.tf           # モジュールの変数定義
+│   │   ├── outputs.tf             # モジュールの出力
+│   │   └── function-source/       # Cloud Functionのソースコード
+│   │       ├── main.py            # Webhookハンドラー（Python）
+│   │       └── requirements.txt   # Python依存パッケージ
+│   └── data-pipeline/             # データパイプラインモジュール
+│       ├── main.tf                # Pub/Sub, BigQuery, IAMのリソース定義
+│       ├── variables.tf
+│       └── outputs.tf
 ├── env/
 │   ├── dev/                       # 開発環境
 │   │   ├── main.tf
@@ -27,6 +66,13 @@ room-env-data-pipeline/
 │       ├── outputs.tf
 │       ├── terraform.tfvars       # 設定済み（room-env-data-pipeline）
 │       └── terraform.tfvars.example
+├── dataform/                      # Dataform定義
+│   ├── dataform.json              # Dataform設定
+│   ├── package.json               # npm依存関係
+│   └── definitions/               # SQLXファイル
+│       ├── sensor_hourly_stats.sqlx    # 時間別集計
+│       ├── sensor_daily_stats.sqlx     # 日別集計
+│       └── sensor_latest.sqlx          # 最新状態（Looker用）
 ├── scripts/
 │   └── setup_switchbot_webhook.sh # SwitchBot Webhook設定スクリプト
 ├── .env                           # SwitchBot認証情報（gitignoreされています）
@@ -38,437 +84,510 @@ room-env-data-pipeline/
 
 ## 機能
 
-- **Webhook受信**: HTTP(S)リクエストを受信
-- **ログ出力**: 受信したリクエストの詳細をCloud Loggingに出力
+### 1. Webhook受信（Cloud Functions）
+- HTTP(S)リクエストを受信
+- リクエストの詳細をCloud Loggingに出力
   - リクエストメソッド（GET, POST, PUT等）
   - ヘッダー情報
   - クエリパラメータ
   - リクエストボディ（JSON/Form/Raw）
-- **SwitchBot対応**: SwitchBot Webhookに対応
-  - Lock/Lock Pro/Lock Ultra（施錠状態、バッテリー残量）
-  - Meter/Meter Plus（温度、湿度、バッテリー残量）
-  - Motion Sensor（検知状態、明るさ）
-  - Contact Sensor（開閉状態、明るさ）
-  - Bot（電源状態、バッテリー残量）
-  - その他SwitchBotデバイスにも対応
-- **環境分離**: dev/prd環境で独立したリソース管理
+
+### 2. SwitchBot対応
+- SwitchBot Webhook形式を自動検出
+- デバイスタイプ別のデータパース
+  - **Lock/Lock Pro/Lock Ultra**: 施錠状態、バッテリー残量
+  - **Meter/Meter Plus**: 温度、湿度、バッテリー残量
+  - **Motion Sensor**: 検知状態、明るさ
+  - **Contact Sensor**: 開閉状態、明るさ
+  - **Bot**: 電源状態、バッテリー残量
+
+### 3. データパイプライン
+- **Pub/Sub**: Cloud Functionsから非同期でメッセージ送信
+- **BigQuery Subscription**: Pub/SubからBigQueryへ自動書き込み
+  - リトライポリシー: 最小10秒〜最大600秒のバックオフ
+  - Dead Letter Queue: 5回失敗後にDLQへ
+- **BigQuery**: パーティショニング（日次）とクラスタリング（device_mac, device_type）
+  - `sensor_raw_data`: 生データテーブル
+  - `sensor_hourly_stats`: 時間別集計テーブル（Dataformで生成）
+  - `sensor_daily_stats`: 日別集計テーブル（Dataformで生成）
+  - `sensor_latest`: 最新状態テーブル（Lookerダッシュボード用）
+
+### 4. Dataform（データ変換）
+- SQLXファイルでデータ変換ロジックを定義
+- スケジュール実行（Cloud Schedulerと連携）
+- インクリメンタル処理で効率的な集計
 
 ## 前提条件
 
 ### 必要なツール
+- Terraform >= 1.0
+- tfenv（Terraformバージョン管理）
+- gcloud CLI
+- GCPプロジェクト
+  - **開発環境**: `room-env-data-pipeline-dev`
+  - **本番環境**: `room-env-data-pipeline`
 
-- **tfenv**: Terraformバージョン管理ツール
-- **GCP CLI (gcloud)**: Google Cloud Platform コマンドラインツール
-- **GCPプロジェクト**: 以下のプロジェクトが作成済み
-  - 開発環境: `room-env-data-pipeline-dev`
-  - 本番環境: `room-env-data-pipeline`
-
-### tfenvのインストール
-
-#### macOS (Homebrew)
-```bash
-brew install tfenv
-```
-
-#### Linux
-```bash
-git clone https://github.com/tfutils/tfenv.git ~/.tfenv
-echo 'export PATH="$HOME/.tfenv/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### Terraformのインストール
-
-プロジェクトルートで以下を実行すると、`.terraform-version`に記載されたバージョンが自動的にインストールされます：
-
-```bash
-cd /path/to/room-env-data-pipeline
-tfenv install
-```
-
-バージョンの確認：
-```bash
-terraform version
-# Terraform v1.6.6 と表示されることを確認
-```
-
-### GCP APIの有効化
-
-各プロジェクトで以下のAPIを有効化してください：
-- Cloud Functions API
-- Cloud Build API
-- Cloud Storage API
-- Cloud Logging API
-
-開発環境:
-```bash
-gcloud services enable cloudfunctions.googleapis.com \
-  cloudbuild.googleapis.com \
-  storage.googleapis.com \
-  logging.googleapis.com \
-  --project=room-env-data-pipeline-dev
-```
-
-本番環境:
-```bash
-gcloud services enable cloudfunctions.googleapis.com \
-  cloudbuild.googleapis.com \
-  storage.googleapis.com \
-  logging.googleapis.com \
-  --project=room-env-data-pipeline
-```
-
-### GCPの認証設定
-
-```bash
-gcloud auth application-default login
-```
-
-## セットアップ
-
-### 1. Terraformのインストール（tfenv使用）
-
-プロジェクトルートに移動して、tfenvでTerraformをインストール：
-
-```bash
-cd /path/to/room-env-data-pipeline
-tfenv install
-```
-
-これにより、`.terraform-version`ファイルに記載されたバージョン（1.6.6）が自動的にインストールされます。
-
-### 2. プロジェクト設定の確認
-
-各環境の`terraform.tfvars`ファイルは既に以下のプロジェクトIDで設定済みです：
-
-- **開発環境** (`env/dev/terraform.tfvars`): `room-env-data-pipeline-dev`
-- **本番環境** (`env/prd/terraform.tfvars`): `room-env-data-pipeline`
-
-必要に応じて、リソース設定（メモリ、インスタンス数等）をカスタマイズできます。
-
-### 3. Terraformの初期化とデプロイ
+### 必要なGCP API
+以下のAPIを有効化してください。
 
 #### 開発環境
-
 ```bash
-cd env/dev
-terraform init
-terraform plan
-terraform apply
+gcloud services enable cloudfunctions.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  storage.googleapis.com \
+  iam.googleapis.com \
+  cloudbuild.googleapis.com \
+  pubsub.googleapis.com \
+  bigquery.googleapis.com \
+  dataform.googleapis.com \
+  --project=room-env-data-pipeline-dev
 ```
 
 #### 本番環境
-
 ```bash
-cd env/prd
-terraform init
-terraform plan
-terraform apply
-```
-
-## デプロイ後の確認
-
-デプロイが完了すると、Webhook URLが出力されます：
-
-```bash
-terraform output webhook_url
-```
-
-出力例（開発環境）：
-```
-webhook_url = "https://asia-northeast1-room-env-data-pipeline-dev.cloudfunctions.net/dev-webhook-function"
-```
-
-出力例（本番環境）：
-```
-webhook_url = "https://asia-northeast1-room-env-data-pipeline.cloudfunctions.net/prd-webhook-function"
-```
-
-## Webhookのテスト
-
-### curlコマンドでテスト
-
-デプロイ後に `terraform output webhook_url` で取得したURLを使用してテストします。
-
-開発環境の例:
-```bash
-# Webhook URLを環境変数に設定
-WEBHOOK_URL=$(cd env/dev && terraform output -raw webhook_url)
-
-# GETリクエスト
-curl "$WEBHOOK_URL?param1=value1"
-
-# POSTリクエスト（JSON）
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello, World!", "timestamp": "2025-01-01T00:00:00Z"}' \
-  "$WEBHOOK_URL"
-
-# POSTリクエスト（Form）
-curl -X POST \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "key1=value1&key2=value2" \
-  "$WEBHOOK_URL"
-```
-
-### レスポンス例
-
-```json
-{
-  "status": "success",
-  "message": "Webhook received successfully",
-  "method": "POST",
-  "timestamp": null
-}
-```
-
-## ログの確認
-
-Cloud Loggingでログを確認できます：
-
-開発環境:
-```bash
-# GCPコンソールから
-# https://console.cloud.google.com/logs/query?project=room-env-data-pipeline-dev
-
-# gcloudコマンドから
-gcloud functions logs read dev-webhook-function \
-  --region=asia-northeast1 \
-  --limit=50 \
-  --project=room-env-data-pipeline-dev
-```
-
-本番環境:
-```bash
-# GCPコンソールから
-# https://console.cloud.google.com/logs/query?project=room-env-data-pipeline
-
-# gcloudコマンドから
-gcloud functions logs read prd-webhook-function \
-  --region=asia-northeast1 \
-  --limit=50 \
+gcloud services enable cloudfunctions.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  storage.googleapis.com \
+  iam.googleapis.com \
+  cloudbuild.googleapis.com \
+  pubsub.googleapis.com \
+  bigquery.googleapis.com \
+  dataform.googleapis.com \
   --project=room-env-data-pipeline
 ```
 
-ログには以下の情報が記録されます：
-- リクエストメソッド
-- ヘッダー情報
-- クエリパラメータ
-- リクエストボディ
-- レスポンス内容
-- SwitchBotデバイスの詳細情報（デバイスタイプ、状態、バッテリー等）
+### 必要な権限
+- `roles/owner` または以下の権限:
+  - `roles/cloudfunctions.admin`
+  - `roles/storage.admin`
+  - `roles/iam.serviceAccountAdmin`
+  - `roles/pubsub.admin`
+  - `roles/bigquery.admin`
+  - `roles/dataform.admin`
 
-## SwitchBot Webhookの設定
+## セットアップ
 
-このシステムはSwitchBot Webhookに対応しています。
+### 1. tfenvのインストールとTerraformセットアップ
 
-### SwitchBot APIの設定
+```bash
+# tfenvのインストール（Homebrewの場合）
+brew install tfenv
 
-1. **SwitchBotアプリでOpen Tokenを取得**
-   - SwitchBotアプリ → プロフィール → 設定 → アプリバージョン（10回タップして開発者オプションを有効化）
-   - 「トークン」をタップしてOpen TokenとSecret Keyを取得
+# Terraformバージョンのインストール（.terraform-versionに基づく）
+tfenv install
+tfenv use
+```
 
-2. **Webhook URLを設定**
+### 2. Terraformの初期化とデプロイ（開発環境）
 
-開発環境のWebhook URL:
+プロジェクトIDとBigQueryオーナーのEmailはすでに`terraform.tfvars`に設定されています。
+
+```bash
+cd env/dev
+
+# 初期化
+terraform init
+
+# プランの確認
+terraform plan
+
+# デプロイ
+terraform apply
+```
+
+### 3. Webhook URLの確認
+
+```bash
+cd env/dev
+terraform output webhook_url
+```
+
+出力例:
 ```
 https://asia-northeast1-room-env-data-pipeline-dev.cloudfunctions.net/dev-webhook-function
 ```
 
-本番環境のWebhook URL:
-```
-https://asia-northeast1-room-env-data-pipeline.cloudfunctions.net/prd-webhook-function
-```
+### 4. SwitchBot Webhook設定
 
-3. **SwitchBot APIでWebhook URLを登録**
-
-`.env`ファイルに認証情報を設定してスクリプトを実行するだけで簡単に設定できます：
+`.env`ファイルを作成して、SwitchBot APIの認証情報を設定します：
 
 ```bash
-# プロジェクトルートで実行
-bash scripts/setup_switchbot_webhook.sh
+# .envファイルを作成（.env.exampleをコピー）
+cp .env.example .env
+
+# エディタで.envファイルを編集
+# SWITCHBOT_TOKEN="your_token_here"
+# SWITCHBOT_SECRET="your_secret_here"
 ```
 
-または、手動で設定する場合：
+設定スクリプトを実行：
 
 ```bash
-# 認証情報の設定（.envファイルから読み込み）
-source .env
-NONCE=$(uuidgen)
-T=$(date +%s)000
-SIGN=$(echo -n "${SWITCHBOT_TOKEN}${T}${NONCE}" | openssl dgst -sha256 -hmac "${SWITCHBOT_SECRET}" -binary | base64)
-
-# Webhook URLの設定
-curl -X POST "https://api.switch-bot.com/v1.1/webhook/setupWebhook" \
-  -H "Authorization: ${SWITCHBOT_TOKEN}" \
-  -H "sign: ${SIGN}" \
-  -H "t: ${T}" \
-  -H "nonce: ${NONCE}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "setupWebhook",
-    "url": "https://asia-northeast1-room-env-data-pipeline-dev.cloudfunctions.net/dev-webhook-function",
-    "deviceList": "ALL"
-  }'
-
-# 設定確認
-curl -X POST "https://api.switch-bot.com/v1.1/webhook/queryWebhook" \
-  -H "Authorization: ${SWITCHBOT_TOKEN}" \
-  -H "sign: ${SIGN}" \
-  -H "t: ${T}" \
-  -H "nonce: ${NONCE}" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"queryUrl"}' | jq '.'
+chmod +x scripts/setup_switchbot_webhook.sh
+./scripts/setup_switchbot_webhook.sh
 ```
 
-参考: [SwitchBot API Documentation](https://github.com/OpenWonderLabs/SwitchBotAPI?tab=readme-ov-file#get-webhook-configuration)
+## BigQueryテーブル
 
-### 対応デバイス
+### sensor_raw_data（生データテーブル）
 
-現在対応しているSwitchBotデバイス：
+| カラム | 型 | 説明 |
+|--------|-----|------|
+| timestamp | TIMESTAMP | イベントタイムスタンプ |
+| device_mac | STRING | デバイスMACアドレス |
+| device_type | STRING | デバイスタイプ |
+| event_type | STRING | イベントタイプ |
+| temperature | FLOAT | 温度（℃） |
+| humidity | INTEGER | 湿度（%） |
+| battery | INTEGER | バッテリー残量（%） |
+| lock_state | STRING | 施錠状態 |
+| detection_state | STRING | 検知状態 |
+| open_state | STRING | 開閉状態 |
+| power_state | STRING | 電源状態 |
+| brightness | STRING | 明るさ |
+| raw_data | JSON | 完全な生データ |
+| inserted_at | TIMESTAMP | BigQuery挿入時刻 |
 
-| デバイス | 取得データ |
-|---------|-----------|
-| **Lock/Lock Pro/Lock Ultra** | 施錠状態（LOCKED/UNLOCKED/JAMMED）、バッテリー残量 |
-| **Meter/Meter Plus** | 温度、湿度、バッテリー残量 |
-| **Motion Sensor** | 検知状態（DETECTED/NOT_DETECTED）、明るさ |
-| **Contact Sensor** | 開閉状態（open/close/timeOutNotClose）、明るさ |
-| **Bot** | 電源状態（ON/OFF）、バッテリー残量 |
+### sensor_hourly_stats（時間別集計テーブル）
 
-その他のSwitchBotデバイスも基本的な情報を受信・ログ出力できます。
+Dataformによって生成されます。
 
-### ログの確認例
+| カラム | 型 | 説明 |
+|--------|-----|------|
+| hour_timestamp | TIMESTAMP | 時間（時の開始） |
+| device_mac | STRING | デバイスMACアドレス |
+| device_type | STRING | デバイスタイプ |
+| avg_temperature | FLOAT | 平均温度 |
+| min_temperature | FLOAT | 最低温度 |
+| max_temperature | FLOAT | 最高温度 |
+| avg_humidity | FLOAT | 平均湿度 |
+| min_humidity | INTEGER | 最低湿度 |
+| max_humidity | INTEGER | 最高湿度 |
+| avg_battery | FLOAT | 平均バッテリー残量 |
+| event_count | INTEGER | イベント数 |
+| last_updated | TIMESTAMP | 最終更新時刻 |
 
-SwitchBotデバイスのイベントは、以下のようにログに記録されます：
+### sensor_latest（最新状態テーブル）
 
-```
-[SwitchBot] Event Type: changeReport, Version: 1
-[SwitchBot] Device: WoSensorTH (MAC: AA:BB:CC:DD:EE:FF)
-[SwitchBot Meter] Temp: 25.3°C, Humidity: 65%, Battery: 85%
-```
+Lookerダッシュボード用。各デバイスの最新状態を表示。
 
-```
-[SwitchBot] Event Type: changeReport, Version: 1
-[SwitchBot] Device: Smart Lock Pro (MAC: 11:22:33:44:55:66)
-[SwitchBot Lock] State: LOCKED, Battery: 90%
-```
+| カラム | 型 | 説明 |
+|--------|-----|------|
+| device_mac | STRING | デバイスMACアドレス |
+| device_type | STRING | デバイスタイプ |
+| last_updated | TIMESTAMP | 最終更新時刻 |
+| current_temperature | FLOAT | 現在の温度 |
+| current_humidity | INTEGER | 現在の湿度 |
+| current_battery | INTEGER | 現在のバッテリー残量 |
+| temperature_change | FLOAT | 温度の変化（前回比） |
+| minutes_since_update | INTEGER | 最終更新からの経過時間（分） |
 
-## 設定のカスタマイズ
+## Dataform設定
 
-### Cloud Functionsのリソース設定
+### Dataformリポジトリの作成（GCPコンソール）
 
-`env/{dev,prd}/terraform.tfvars`で以下の設定を調整できます：
+1. GCPコンソールで **Dataform** を開く
+2. **リポジトリを作成** をクリック
+3. リポジトリ名: `sensor-data-transformation`
+4. リージョン: `asia-northeast1`
+5. ワークスペースを作成
+6. `dataform/`ディレクトリの内容をアップロード
 
-```hcl
-# インスタンス数
-max_instance_count = 10  # 最大インスタンス数
-min_instance_count = 0   # 最小インスタンス数（0で自動スケールダウン）
+### スケジュール実行の設定
 
-# メモリとタイムアウト
-memory          = "512Mi"  # 256Mi, 512Mi, 1Gi, 2Gi, 4Gi, 8Gi
-timeout_seconds = 60       # 1-540秒
-
-# 環境変数
-environment_variables = {
-  ENVIRONMENT = "development"
-  LOG_LEVEL   = "INFO"
-  CUSTOM_VAR  = "value"
-}
-```
-
-## リソースの削除
-
-環境を削除する場合：
+Cloud Schedulerでワークフローを定期実行できます。
 
 ```bash
-# 開発環境
-cd env/dev
-terraform destroy
-
-# 本番環境
-cd env/prd
-terraform destroy
-```
-
-## セキュリティ考慮事項
-
-現在の設定では、Cloud Functionに対して**パブリックアクセス**が許可されています（Webhookとして機能させるため）。
-
-本番環境で使用する場合は、以下のセキュリティ対策を検討してください：
-
-1. **認証の追加**: 
-   - APIキーによる認証
-   - Cloud IAMによる認証
-   - JWTトークンの検証
-
-2. **Cloud Armorの導入**:
-   - DDoS対策
-   - レート制限
-   - IPアドレス制限
-
-3. **Secret Managerの利用**:
-   - API鍵などの機密情報を環境変数ではなくSecret Managerで管理
-
-## トラブルシューティング
-
-### Terraformバージョンの問題
-
-もし異なるTerraformバージョンが使われている場合：
-
-```bash
-# 現在のバージョンを確認
-terraform version
-
-# .terraform-versionで指定されたバージョンをインストール
-tfenv install
-
-# バージョンを切り替え
-tfenv use 1.6.6
-
-# または、自動で切り替え（.terraform-versionを読む）
-cd env/dev  # プロジェクトルート配下のどこでも可
-terraform version
-```
-
-### デプロイエラー
-
-開発環境:
-```bash
-# APIが有効になっているか確認
-gcloud services list --enabled --project=room-env-data-pipeline-dev
-
-# 必要に応じてAPIを有効化
-gcloud services enable cloudfunctions.googleapis.com \
-  cloudbuild.googleapis.com \
-  storage.googleapis.com \
+# 1時間ごとに実行する例
+gcloud scheduler jobs create app-engine sensor-hourly-aggregation \
+  --schedule="0 * * * *" \
+  --time-zone="Asia/Tokyo" \
+  --location=asia-northeast1 \
+  --uri="https://dataform.googleapis.com/v1beta1/projects/room-env-data-pipeline-dev/locations/asia-northeast1/repositories/sensor-data-transformation/workspaces/main/workflows" \
+  --http-method=POST \
   --project=room-env-data-pipeline-dev
 ```
 
-本番環境:
-```bash
-# APIが有効になっているか確認
-gcloud services list --enabled --project=room-env-data-pipeline
+または、Dataformのスケジュール機能を使用：
+1. Dataformコンソールで **Release Configurations** を開く
+2. 新しいスケジュールを作成
+3. Cron式を設定（例: `0 * * * *` で毎時）
 
-# 必要に応じてAPIを有効化
-gcloud services enable cloudfunctions.googleapis.com \
-  cloudbuild.googleapis.com \
-  storage.googleapis.com \
-  --project=room-env-data-pipeline
+## Looker設定
+
+### Lookerでデータソース接続
+
+1. Lookerで **Admin > Connections** を開く
+2. **Add Connection** をクリック
+3. 以下を設定：
+   - Name: `room-env-bigquery`
+   - Database: `BigQuery`
+   - Project ID: `room-env-data-pipeline-dev` （または `room-env-data-pipeline`）
+   - Dataset: `dev_sensor_data` （または `prd_sensor_data`）
+4. サービスアカウントの認証情報を設定
+
+### Lookerダッシュボード作成
+
+推奨するビジュアライゼーション：
+
+**現在の状態（sensor_latest）**:
+- 温度ゲージ
+- 湿度ゲージ
+- バッテリー残量インジケータ
+- 最終更新時刻
+
+**履歴データ（sensor_hourly_stats / sensor_daily_stats）**:
+- 温度・湿度の折れ線グラフ（時系列）
+- 温度・湿度の分布ヒストグラム
+- デバイス別比較グラフ
+
+## デプロイ後の確認
+
+### Webhookのテスト
+
+#### 開発環境
+```bash
+# 環境変数設定
+export WEBHOOK_URL="https://asia-northeast1-room-env-data-pipeline-dev.cloudfunctions.net/dev-webhook-function"
+
+# テストデータ送信
+curl -X POST "$WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eventType": "changeReport",
+    "eventVersion": "1",
+    "context": {
+      "deviceType": "WoSensorTH",
+      "deviceMac": "TEST123456",
+      "timeOfSample": 1234567890000,
+      "temperature": 25.5,
+      "humidity": 65,
+      "battery": 85
+    }
+  }'
 ```
 
-### 権限エラー
+#### 本番環境
+```bash
+export WEBHOOK_URL="https://asia-northeast1-room-env-data-pipeline.cloudfunctions.net/prd-webhook-function"
 
-Terraformを実行するユーザー/サービスアカウントに以下の権限が必要です：
-- Cloud Functions Developer
-- Storage Admin
-- Service Account User
-- IAM Admin（サービスアカウント作成のため）
+# （同様のcurlコマンド）
+```
+
+### ログの確認
+
+#### Cloud Functionsのログ
+```bash
+# 開発環境
+gcloud functions logs read dev-webhook-function \
+  --project=room-env-data-pipeline-dev \
+  --region=asia-northeast1 \
+  --limit=50
+
+# 本番環境
+gcloud functions logs read prd-webhook-function \
+  --project=room-env-data-pipeline \
+  --region=asia-northeast1 \
+  --limit=50
+```
+
+SwitchBotデバイスの詳細な情報（温度、湿度、バッテリー残量等）もログに出力されます。
+
+#### BigQueryでデータ確認
+
+```bash
+# 開発環境
+bq query --project_id=room-env-data-pipeline-dev --use_legacy_sql=false \
+'SELECT timestamp, device_mac, device_type, temperature, humidity, battery 
+FROM `room-env-data-pipeline-dev.dev_sensor_data.sensor_raw_data` 
+ORDER BY timestamp DESC 
+LIMIT 10'
+
+# 時間別集計データの確認
+bq query --project_id=room-env-data-pipeline-dev --use_legacy_sql=false \
+'SELECT hour_timestamp, device_type, avg_temperature, avg_humidity, event_count 
+FROM `room-env-data-pipeline-dev.dev_sensor_data.sensor_hourly_stats` 
+ORDER BY hour_timestamp DESC 
+LIMIT 10'
+```
+
+#### Pub/Sub Subscriptionの確認
+
+```bash
+# Subscription状態の確認
+gcloud pubsub subscriptions describe dev-switchbot-to-bigquery \
+  --project=room-env-data-pipeline-dev
+
+# Dead Letter Queueの確認
+gcloud pubsub topics list --project=room-env-data-pipeline-dev | grep dlq
+```
+
+## SwitchBot Webhookの設定
+
+### 1. トークンとクライアントシークレットの取得
+
+SwitchBotアプリで以下の手順で取得：
+
+1. SwitchBotアプリを開く
+2. プロフィール → 設定 → アプリバージョン（10回タップ）
+3. 開発者オプション → トークンを取得
+
+### 2. Webhook URLの確認
+
+- **開発環境**: `https://asia-northeast1-room-env-data-pipeline-dev.cloudfunctions.net/dev-webhook-function`
+- **本番環境**: `https://asia-northeast1-room-env-data-pipeline.cloudfunctions.net/prd-webhook-function`
+
+### 3. 認証情報の設定
+
+`.env`ファイルを作成：
+
+```bash
+SWITCHBOT_TOKEN="your_token_here"
+SWITCHBOT_SECRET="your_secret_here"
+```
+
+### 4. Webhook登録スクリプトの実行
+
+```bash
+# 開発環境用（デフォルト）
+./scripts/setup_switchbot_webhook.sh
+```
+
+スクリプトは以下を実行します：
+1. 現在のWebhook設定を取得
+2. 新しいWebhook URLを設定
+3. 設定後の状態を確認
+
+### 5. 手動でWebhookを設定する場合
+
+#### 署名の生成（必須）
+
+SwitchBot APIは署名認証が必要です：
+
+```bash
+TOKEN="your_token"
+SECRET="your_secret"
+NONCE=$(uuidgen)
+T=$(date +%s)000
+SIGN=$(echo -n "${TOKEN}${T}${NONCE}" | openssl dgst -sha256 -hmac "$SECRET" -binary | base64)
+
+curl -X POST "https://api.switch-bot.com/v1.1/webhook/setupWebhook" \
+  -H "Authorization: ${TOKEN}" \
+  -H "sign: ${SIGN}" \
+  -H "t: ${T}" \
+  -H "nonce: ${NONCE}" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"action\": \"setupWebhook\",
+    \"url\": \"$WEBHOOK_URL\",
+    \"deviceList\": \"ALL\"
+  }"
+```
+
+## トラブルシューティング
+
+### APIが有効化されていないエラー
+
+```bash
+# 開発環境
+gcloud services list --enabled --project=room-env-data-pipeline-dev
+
+# 必要なAPIを有効化
+gcloud services enable cloudfunctions.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  storage.googleapis.com \
+  iam.googleapis.com \
+  cloudbuild.googleapis.com \
+  pubsub.googleapis.com \
+  bigquery.googleapis.com \
+  dataform.googleapis.com \
+  --project=room-env-data-pipeline-dev
+```
+
+### Webhookが403エラーを返す
+
+Cloud Functions 2nd genはCloud Runを内部で使用しているため、`run.invoker`権限が必要です。
+これはTerraformで自動設定されていますが、手動で確認する場合：
+
+```bash
+gcloud run services add-iam-policy-binding dev-webhook-function \
+  --member="allUsers" \
+  --role="roles/run.invoker" \
+  --region=asia-northeast1 \
+  --project=room-env-data-pipeline-dev
+```
+
+### BigQueryにデータが入らない
+
+#### Pub/Sub Subscriptionの状態確認
+```bash
+gcloud pubsub subscriptions describe dev-switchbot-to-bigquery \
+  --project=room-env-data-pipeline-dev
+```
+
+#### BigQuery APIのログ確認
+```bash
+gcloud logging read 'resource.type="pubsub_subscription" AND resource.labels.subscription_id="dev-switchbot-to-bigquery"' \
+  --project=room-env-data-pipeline-dev \
+  --limit=20
+```
+
+#### Dead Letter Queueの確認
+```bash
+# DLQにメッセージがあるか確認
+gcloud pubsub topics list --project=room-env-data-pipeline-dev | grep dlq
+```
+
+### Dataformが実行できない
+
+#### 権限の確認
+```bash
+# Dataform用のサービスアカウントにBigQuery権限を付与
+gcloud projects add-iam-policy-binding room-env-data-pipeline-dev \
+  --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-dataform.iam.gserviceaccount.com" \
+  --role="roles/bigquery.dataEditor"
+```
+
+## 本番環境へのデプロイ
+
+開発環境で動作確認後、本番環境にデプロイ：
+
+```bash
+cd env/prd
+
+# 初期化
+terraform init
+
+# プランの確認
+terraform plan
+
+# デプロイ
+terraform apply
+```
+
+## クリーンアップ
+
+### 開発環境の削除
+```bash
+cd env/dev
+terraform destroy
+```
+
+### 本番環境の削除
+```bash
+cd env/prd
+terraform destroy
+```
 
 ## ライセンス
 
 MIT License
 
-## サポート
+## 参考資料
 
-問題や質問がある場合は、GitHubのIssueで報告してください。
-
+- [SwitchBot API Documentation](https://github.com/OpenWonderLabs/SwitchBotAPI)
+- [Terraform Google Provider](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
+- [Cloud Functions (2nd gen) Documentation](https://cloud.google.com/functions/docs)
+- [Pub/Sub BigQuery Subscription](https://cloud.google.com/pubsub/docs/bigquery)
+- [Dataform Documentation](https://cloud.google.com/dataform/docs)
+- [Looker Documentation](https://cloud.google.com/looker/docs)
