@@ -17,7 +17,7 @@ WITH latest_records AS (
       ORDER BY timestamp DESC
     ) AS rn
   FROM
-    ${ref("sensor_raw_data")}
+    `${dataform.projectConfig.defaultDatabase}.${dataform.projectConfig.defaultSchema}.sensor_raw_data`
 )
 
 SELECT

@@ -24,7 +24,7 @@ SELECT
   COUNT(*) AS event_count,
   CURRENT_TIMESTAMP() AS last_updated
 FROM
-  ${ref("sensor_raw_data")}
+  `${dataform.projectConfig.defaultDatabase}.${dataform.projectConfig.defaultSchema}.sensor_raw_data`
 WHERE
   temperature IS NOT NULL
   OR humidity IS NOT NULL
