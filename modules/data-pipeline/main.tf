@@ -625,10 +625,9 @@ resource "google_dataform_repository" "sensor_data_transformation" {
     }
   }
 
-  # ワークスペースの設定（環境ごとの上書き）
+  # ワークスペースの設定
   workspace_compilation_overrides {
     default_database = var.project_id
-    default_schema   = "${var.environment}_sensor_data"  # dev_sensor_data または prd_sensor_data
   }
 
   depends_on = [
