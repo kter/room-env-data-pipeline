@@ -1,6 +1,5 @@
 config {
   type: "table",
-  schema: "dev_sensor_data",
   description: "各デバイスの最新状態（Lookerダッシュボード用）",
   bigquery: {
     clusterBy: ["device_mac", "device_type"]

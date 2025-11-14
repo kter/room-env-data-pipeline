@@ -336,14 +336,30 @@ Lookerダッシュボード用。各デバイスの最新状態を表示。
 
 ## Dataform設定
 
-### Dataformリポジトリの作成（GCPコンソール）
+### Dataformリポジトリの作成（自動）
 
-1. GCPコンソールで **Dataform** を開く
-2. **リポジトリを作成** をクリック
-3. リポジトリ名: `sensor-data-transformation`
-4. リージョン: `asia-northeast1`
-5. ワークスペースを作成
-6. `dataform/`ディレクトリの内容をアップロード
+Terraformで自動的に作成されます：
+- **リポジトリ名**: `{environment}-sensor-data-transformation`
+- **リージョン**: `asia-northeast1`
+- **GitHub連携**: 自動同期（developブランチ → dev環境、mainブランチ → prd環境）
+- **スケジュール実行**: 毎時0分に自動実行
+
+### 手動実行
+
+Dataformの集計処理を手動で実行する場合：
+
+```bash
+# dev環境で実行
+./scripts/run_dataform_manually.sh dev
+
+# prd環境で実行
+./scripts/run_dataform_manually.sh prd
+```
+
+このスクリプトは以下のテーブルを順番に作成します：
+1. `sensor_hourly_stats` - 時間別集計
+2. `sensor_daily_stats` - 日別集計
+3. `sensor_latest` - 最新状態
 
 ### スケジュール実行の設定
 

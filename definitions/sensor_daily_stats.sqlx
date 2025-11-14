@@ -1,6 +1,5 @@
 config {
   type: "table",
-  schema: "dev_sensor_data",
   description: "日別のセンサーデータ集計テーブル（Looker用）",
   bigquery: {
     partitionBy: "date",
