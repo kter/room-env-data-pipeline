@@ -1,5 +1,6 @@
 config {
   type: "incremental",
+  schema: "dev_sensor_data",
   description: "時間別のセンサーデータ集計テーブル",
   bigquery: {
     partitionBy: "TIMESTAMP_TRUNC(hour_timestamp, DAY)",
