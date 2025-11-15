@@ -52,7 +52,7 @@ def convert_to_bigquery_format(data: dict) -> dict:
         "detection_state": context.get('detectionState') or '',
         "open_state": context.get('openState') or '',
         "power_state": context.get('powerState') or '',
-        "brightness": context.get('lightLevel') or context.get('brightness') or '',  # lightLevel → brightness
+        "brightness": context.get('lightLevel') or context.get('brightness'),  # lightLevel → brightness (INTEGER)
         "raw_data": json.dumps(data, ensure_ascii=False),  # JSONを文字列化
         "inserted_at": current_time
     }

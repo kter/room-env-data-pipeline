@@ -135,9 +135,9 @@ resource "google_bigquery_table" "sensor_raw_data" {
     },
     {
       name        = "brightness"
-      type        = "STRING"
+      type        = "INTEGER"
       mode        = "NULLABLE"
-      description = "Brightness level"
+      description = "Brightness level (0-100)"
     },
     {
       name        = "raw_data"
@@ -468,9 +468,9 @@ resource "google_bigquery_table" "sensor_latest" {
     },
     {
       name        = "brightness"
-      type        = "STRING"
+      type        = "INTEGER"
       mode        = "NULLABLE"
-      description = "Brightness level"
+      description = "Brightness level (0-100)"
     },
     {
       name        = "minutes_since_update"

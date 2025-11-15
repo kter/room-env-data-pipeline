@@ -109,7 +109,7 @@ bq query \
       ROW_NUMBER() OVER (
         PARTITION BY device_mac, device_type
         ORDER BY timestamp DESC
-      ) AS row_num
+      ) AS rn
     FROM
       \`$PROJECT_ID.$DATASET_ID.sensor_raw_data\`
   )
@@ -117,14 +117,23 @@ bq query \
     device_mac,
     device_type,
     timestamp AS last_updated,
-    temperature,
-    humidity,
-    battery,
+    temperature AS current_temperature,
+    humidity AS current_humidity,
+    battery AS current_battery,
+    lock_state,
+    detection_state,
+    open_state,
+    power_state,
+    brightness,
+    temperature - LAG(temperature) OVER (
+      PARTITION BY device_mac
+      ORDER BY timestamp
+    ) AS temperature_change,
     TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), timestamp, MINUTE) AS minutes_since_update
   FROM
     latest_records
   WHERE
-    row_num = 1" > /dev/null
+    rn = 1" > /dev/null
 
 echo "✅ sensor_latest 作成完了"
 echo ""
