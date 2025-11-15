@@ -52,7 +52,7 @@ def convert_to_bigquery_format(data: dict) -> dict:
         "detection_state": context.get('detectionState') or '',
         "open_state": context.get('openState') or '',
         "power_state": context.get('powerState') or '',
-        "brightness": context.get('brightness') or '',
+        "brightness": context.get('lightLevel') or context.get('brightness') or '',  # lightLevel → brightness
         "raw_data": json.dumps(data, ensure_ascii=False),  # JSONを文字列化
         "inserted_at": current_time
     }
@@ -132,7 +132,7 @@ def process_switchbot_webhook(data: dict) -> dict:
     # Motion Sensor
     elif 'detectionState' in context:
         detection_state = context['detectionState']
-        brightness = context.get('brightness', 'unknown')
+        brightness = context.get('lightLevel') or context.get('brightness', 'unknown')
         logger.info(f"[SwitchBot Motion] Detection: {detection_state}, Brightness: {brightness}")
         result['detectionState'] = detection_state
         result['brightness'] = brightness
@@ -140,7 +140,7 @@ def process_switchbot_webhook(data: dict) -> dict:
     # Contact Sensor
     elif 'openState' in context:
         open_state = context['openState']
-        brightness = context.get('brightness', 'unknown')
+        brightness = context.get('lightLevel') or context.get('brightness', 'unknown')
         logger.info(f"[SwitchBot Contact] State: {open_state}, Brightness: {brightness}")
         result['openState'] = open_state
         result['brightness'] = brightness
